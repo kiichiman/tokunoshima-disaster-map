@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>徳之島 災害通報マップ</title>
+<script>
+const SUPABASE_URL = "https://ovhhjbelgjosvqknozsn.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_yzxBkwjyRuLppxnGG_8i6A_9iMFw6VV";
+window.APP_CONFIG = { SUPABASE_URL, SUPABASE_ANON_KEY };
+</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17202a}
+body{background:#f4f7f9}
+header{padding:10px 14px;background:#075985;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:10px}
+h1{font-size:18px;margin:0}
+button,select{font:inherit}
+button{border:0;border-radius:7px;padding:9px 12px;cursor:pointer}
+.primary{background:#f59e0b;color:#111;font-weight:700}
+.secondary{background:#e5e7eb;color:#111}
+.danger{background:#dc2626;color:#fff}
+#map{height:calc(100vh - 178px);min-height:350px}
+.controls{background:#fff;padding:8px 12px;box-shadow:0 1px 5px #0002;position:relative;z-index:500}
+.tabs{display:flex;gap:6px;overflow:auto;margin-bottom:7px}
+.tab{background:#e5e7eb;white-space:nowrap}
+.tab.active{background:#075985;color:#fff}
+.filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#carrier{display:none}
+.timeline{display:flex;align-items:center;gap:8px;margin-top:7px}
+#time{width:100%}
+#timeLabel{font-size:12px;white-space:nowrap;color:#374151}
+.note{font-size:11px;color:#4b5563;padding:7px 12px;background:#fff}
+.legend{position:absolute;z-index:400;bottom:25px;left:10px;background:#fffffff0;padding:8px;border-radius:7px;font-size:12px;line-height:1.8;box-shadow:0 1px 5px #0003}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.warn{background:#f59e0b}.active{background:#dc2626}.restored{background:#16a34a}
+.modal{display:none;position:fixed;z-index:1000;inset:0;background:#0008;align-items:center;justify-content:center;padding:14px}
+.modal.show{display:flex}
+.panel{background:#fff;border-radius:10px;padding:18px;width:min(480px,100%);max-height:90vh;overflow:auto}
+.panel h2{margin:0 0 14px;font-size:19px}
+.step{display:none}.step.show{display:block}
+.field{margin:12px 0}.field label{display:block;font-weight:700;margin-bottom:5px}
+.choice{display:flex;gap:8px;flex-wrap:wrap}
+.choice button.selected{outline:3px solid #0ea5e9;background:#e0f2fe}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+#locationMap{height:260px;border-radius:8px;margin:10px 0}
+#message{position:fixed;z-index:2000;right:12px;bottom:12px;max-width:calc(100% - 24px);background:#111827;color:white;padding:11px 14px;border-radius:8px;display:none}
+.leaflet-popup-content button{margin-top:7px}
+@keyframes blink{50%{opacity:.25}}
+.marker-warning{animation:blink 1.2s infinite}
+</style>
+</head>
+<body>
+<header>
+<h1>徳之島 災害通報マップ</h1>
+<button id="reportBtn" class="primary">通報する</button>
+</header>
+<section class="controls">
+<div class="tabs">
+<button class="tab active" data-category="power">停電</button>
+<button class="tab" data-category="water">断水</button>
+<button class="tab" data-category="comm">通信障害</button>
+</div>
+<div class="filters">
+<label for="carrier">キャリア：</label>
+<select id="carrier">
+<option value="">すべて</option><option value="docomo">ドコモ</option>
+<option value="au">au</option><option value="rakuten">楽天モバイル</option>
+</select>
+</div>
+<div class="timeline">
+<span>過去</span><input id="time" type="range"><span>現在</span>
+<span id="timeLabel"></span>
+</div>
+</section>
+<div id="map"></div>
+<div class="legend">
+<div><span class="dot warn"></span>予兆</div>
+<div><span class="dot active"></span>障害中</div>
+<div><span class="dot restored"></span>復旧</div>
+<div style="margin-top:4px;border-top:1px solid #ddd;padding-top:4px;font-size:11px;color:#555">通信キャリア（外側リング）</div>
+<div class="legend-carriers">
+  <span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#cc0000;border:2px solid white;box-shadow:0 0 0 1px #cc0000"></i> ドコモ</span>
+  <span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ff8000;border:2px solid white;box-shadow:0 0 0 1px #ff8000"></i> au</span>
+  <span><i style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#c800a1;border:2px solid white;box-shadow:0 0 0 1px #c800a1"></i> 楽天モバイル</span>
+</div>
+</div>
+<div class="note">※本マップは投稿情報を表示するもので、正確性や安全を保証するものではありません。緊急時は公式情報を確認してください。</div>
+<div id="message"></div>
+
+<div id="modal" class="modal">
+<div class="panel">
+<h2>災害通報 <span id="stepTitle">（1/2）</span></h2>
+<div id="step1" class="step show">
+<div class="field"><label>分野</label><div class="choice" id="categoryChoices">
+<button data-value="power">停電</button><button data-value="water">断水</button><button data-value="comm">通信障害</button>
+</div></div>
+<div class="field" id="carrierField" style="display:none"><label>キャリア</label><div class="choice" id="carrierChoices">
+<button data-value="docomo">ドコモ</button><button data-value="au">au</button><button data-value="rakuten">楽天モバイル</button>
+</div></div>
+<div class="field"><label>状況</label><div class="choice" id="kindChoices">
+<button data-value="sign">予兆（ちらつき）</button><button data-value="onset">障害発生</button>
+</div></div>
+<div class="actions"><button class="secondary" id="cancel1">キャンセル</button><button class="primary" id="nextBtn">次へ</button></div>
+</div>
+<div id="step2" class="step">
+<p>現在地または地図をタップして場所を指定してください。</p>
+<button class="secondary" id="gpsBtn">現在地（GPS）</button>
+<div id="locationMap"></div>
+<div id="locationText">場所未指定</div>
+<div class="actions"><button class="secondary" id="backBtn">戻る</button><button class="primary" id="sendBtn">確認して送信</button></div>
+</div>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+const {SUPABASE_URL, SUPABASE_ANON_KEY}=window.APP_CONFIG;
+const configured=!SUPABASE_URL.includes("YOUR_")&&!SUPABASE_ANON_KEY.includes("YOUR_");
+const supabase=configured?createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
+const now=Date.now(), base=[27.7266,128.9395];
+const sample=[
+{id:"s1",category:"power",carrier:null,lat:27.7266,lng:128.9395,sign_at:new Date(now-8*3600000).toISOString(),onset_at:new Date(now-5*3600000).toISOString(),restored_at:null,created_at:new Date(now-8*3600000).toISOString()},
+{id:"s2",category:"water",carrier:null,lat:27.745,lng:128.965,sign_at:new Date(now-30*3600000).toISOString(),onset_at:null,restored_at:null,created_at:new Date(now-30*3600000).toISOString()},
+{id:"s3",category:"comm",carrier:"docomo",lat:27.70,lng:128.91,sign_at:null,onset_at:new Date(now-12*3600000).toISOString(),restored_at:new Date(now-3*3600000).toISOString(),created_at:new Date(now-12*3600000).toISOString()},
+{id:"s4",category:"comm",carrier:"au",lat:27.76,lng:128.98,sign_at:new Date(now-2*3600000).toISOString(),onset_at:null,restored_at:null,created_at:new Date(now-2*3600000).toISOString()}
+];
+let reports=[], category="power", selectedCarrier="", viewTime=Date.now(), markerLayer, locMap, locMarker;
+const map=L.map("map").setView(base,11);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap contributors"}).addTo(map);
+markerLayer=L.layerGroup().addTo(map);
+const $=id=>document.getElementById(id), msg=t=>{ $("message").textContent=t;$("message").style.display="block";setTimeout(()=>$("message").style.display="none",4500) };
+const isoMs=x=>x?new Date(x).getTime():null;
+function stateAt(r,t){
+  const onset=isoMs(r.onset_at);
+  const sign=isoMs(r.sign_at);
+  const restored=isoMs(r.restored_at);
+  const base=onset??sign;
+  if(restored===null&&base!==null&&t-base>=200*3600000)return null;
+  if(restored!==null&&restored<=t)return"restored";
+  if(onset!==null&&onset<=t)return"active";
+  if(sign!==null&&sign<=t&&(onset===null||t<onset))return"warning";
+  return null;
+}
+function label(r,s){
+ const c={power:"停電",water:"断水",comm:"通信障害"}[r.category], carrier=r.carrier?`（${{docomo:"ドコモ",au:"au",rakuten:"楽天モバイル"}[r.carrier]}）`:"";
+ if(s==="warning")return `${c}${carrier}<br>予兆`;
+ if(s==="restored")return `${c}${carrier}<br>復旧済み`;
+ const h=Math.max(0,Math.floor((viewTime-isoMs(r.onset_at??r.sign_at))/3600000));
+ return `${c}${carrier}<br>障害中（${h}時間経過）`;
+}
+function draw(){
+ markerLayer.clearLayers();
+ reports.filter(r=>r.category===category&&(!selectedCarrier||r.carrier===selectedCarrier)).forEach(r=>{
+  const s=stateAt(r,viewTime);if(!s)return;
+  const color={warning:"#f59e0b",active:"#dc2626",restored:"#16a34a"}[s];
+  const carrierColor={docomo:"#cc0000",au:"#ff8000",rakuten:"#c800a1"}[r.carrier]||"#888";
+  const icon=L.divIcon({
+   className:s==="warning"?"marker-warning":"",
+   html:r.category==="comm"
+    ?`<div style="width:26px;height:26px;border-radius:50%;background:${carrierColor};border:3px solid white;box-shadow:0 1px 5px #0008;display:flex;align-items:center;justify-content:center;box-sizing:border-box"><div style="width:14px;height:14px;border-radius:50%;background:${color}"></div></div>`
+    :`<div style="width:18px;height:18px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 5px #0008"></div>`,
+   iconSize:r.category==="comm"?[26,26]:[18,18],
+   iconAnchor:r.category==="comm"?[13,13]:[9,9]
+  });
+  const m=L.marker([r.lat,r.lng],{icon}).addTo(markerLayer);
+  let html=`<b>${label(r,s)}</b>`;
+  if(s!=="restored")html+=`<br><button class="danger" data-recovery="${r.id}">復旧を報告</button>`;
+  m.bindPopup(html);
+ });
+ $("timeLabel").textContent=new Date(viewTime).toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"numeric",minute:"2-digit"});
+}
+let offlineSeeded=false;
+async function reload(){
+  try{
+    if(configured){
+      const {data,error}=await supabase.from("reports").select("*");
+      if(error)throw error;
+      reports=data||[];
+    }else if(!offlineSeeded){
+      reports=[...sample];
+      offlineSeeded=true;
+    }
+    const now=Date.now();
+    const starts=reports.map(r=>isoMs(r.onset_at??r.sign_at)).filter(Boolean);
+    $("time").min=starts.length?Math.min(...starts):now-72*3600000;
+    $("time").max=now;
+    $("time").value=now;
+    viewTime=now;
+    draw();
+  }catch(e){
+    console.error(e);
+    msg("データ取得に失敗しました。");
+  }
+}
+async function reportRecovery(id){
+ const now=Date.now();
+ const rateMessage=checkReportRateLimit(now,"#recover");
+ if(rateMessage){msg(rateMessage);return}
+ const t=new Date().toISOString();
+ try{
+  if(configured){const {error}=await supabase.from("reports").update({restored_at:t}).eq("id",id).is("restored_at",null);if(error)throw error}
+  else{const r=reports.find(x=>x.id===id);if(r)r.restored_at=t}
+  const log=getReportLog();
+  log["#recover"]=(log["#recover"]||[]).filter(time=>now-time<3600000);
+  log["#recover"].push(now);
+  setReportLog(log);
+  await reload();msg("復旧報告を受け付けました。");
+ }catch(e){console.error(e);msg("復旧報告に失敗しました。");}
+}
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");category=b.dataset.category;$("carrier").style.display=category==="comm"?"inline-block":"none";selectedCarrier=$("carrier").value;draw()});
+$("carrier").onchange=e=>{selectedCarrier=e.target.value;draw()};
+$("time").oninput=e=>{viewTime=+e.target.value;draw()};
+document.addEventListener("click",e=>{if(e.target.dataset.recovery)reportRecovery(e.target.dataset.recovery)});
+let form={category:"power",carrier:null,kind:"onset",lat:null,lng:null};
+function selectGroup(id,key,cb){document.querySelectorAll(`#${id} button`).forEach(b=>b.onclick=()=>{document.querySelectorAll(`#${id} button`).forEach(x=>x.classList.remove("selected"));b.classList.add("selected");cb(b.dataset.value)})}
+selectGroup("categoryChoices","category",v=>{form.category=v;$("carrierField").style.display=v==="comm"?"block":"none"});
+selectGroup("carrierChoices","carrier",v=>form.carrier=v);
+selectGroup("kindChoices","kind",v=>form.kind=v);
+$("reportBtn").onclick=()=>{$("modal").classList.add("show");$("step1").classList.add("show");$("step2").classList.remove("show");$("stepTitle").textContent="（1/2）"};
+$("cancel1").onclick=()=>$("modal").classList.remove("show");
+$("backBtn").onclick=()=>{$("step2").classList.remove("show");$("step1").classList.add("show");$("stepTitle").textContent="（1/2）"};
+$("nextBtn").onclick=()=>{if(form.category==="comm"&&!form.carrier)return msg("キャリアを選択してください。");$("step1").classList.remove("show");$("step2").classList.add("show");$("stepTitle").textContent="（2/2）";setTimeout(()=>locMap.invalidateSize(),100)};
+function setLocation(lat,lng){form.lat=lat;form.lng=lng;$("locationText").textContent=`緯度 ${lat.toFixed(5)} / 経度 ${lng.toFixed(5)}`;if(locMarker)locMarker.setLatLng([lat,lng]);else locMarker=L.marker([lat,lng]).addTo(locMap)}
+$("gpsBtn").onclick=()=>navigator.geolocation.getCurrentPosition(p=>{setLocation(p.coords.latitude,p.coords.longitude);locMap.setView([p.coords.latitude,p.coords.longitude],14)},e=>{console.error(e);msg("GPSで現在地を取得できませんでした。")});
+// ---- 通報送信（いたずら対策：ワンタップ確認＋レート制限）----
+const reportBtn = $("sendBtn");
+const reportBtnLabel = reportBtn.textContent;
+let reportConfirming = false;
+let reportConfirmTimer = null;
+
+const rateKey = form =>
+  form.category === "comm" ? `comm:${form.carrier}` : form.category;
+
+const getReportLog = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("report_log") || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, values]) => [
+        key,
+        Array.isArray(values) ? values.filter(v => Number.isFinite(v)) : []
+      ])
+    );
+  } catch (_) {
+    return {};
+  }
+};
+
+const setReportLog = log => {
+  try {
+    localStorage.setItem("report_log", JSON.stringify(log));
+  } catch (_) {}
+};
+
+const clearReportConfirmation = () => {
+  reportConfirming = false;
+  reportBtn.textContent = reportBtnLabel;
+  if (reportConfirmTimer !== null) {
+    clearTimeout(reportConfirmTimer);
+    reportConfirmTimer = null;
+  }
+};
+
+const checkReportRateLimit = (now, key) => {
+  const hourAgo = now - 60 * 60 * 1000;
+  const log = getReportLog();
+  const entries = Array.isArray(log[key])
+    ? log[key].filter(t => t > hourAgo && t <= now)
+    : [];
+  const latest = entries.length ? Math.max(...entries) : 0;
+  if (latest && now - latest < 20 * 1000) {
+    const remaining = Math.ceil((20 * 1000 - (now - latest)) / 1000);
+    return `連続送信はできません。あと${remaining}秒お待ちください。`;
+  }
+  if (entries.length >= 5) {
+    return "同じ分野の1時間あたり送信上限（5件）に達しています。";
+  }
+  return null;
+};
+
+reportBtn.onclick = async () => {
+  if (form.lat == null) {
+    return msg("地図をタップして場所を指定してください。");
+  }
+
+  const now = Date.now();
+  const rateLimitMessage = checkReportRateLimit(now, rateKey(form));
+  if (rateLimitMessage) {
+    clearReportConfirmation();
+    return msg(rateLimitMessage);
+  }
+
+  if (!reportConfirming) {
+    reportConfirming = true;
+    reportBtn.textContent = "確認：もう一度押して送信";
+    reportConfirmTimer = setTimeout(clearReportConfirmation, 5000);
+    return;
+  }
+
+  const t = new Date().toISOString();
+  const r = {
+    category: form.category,
+    carrier: form.category === "comm" ? form.carrier : null,
+    lat: form.lat,
+    lng: form.lng,
+    sign_at: form.kind === "sign" ? t : null,
+    onset_at: form.kind === "onset" ? t : null,
+    created_at: t
+  };
+
+  try {
+    if (configured) {
+      const { error } = await supabase.from("reports").insert(r);
+      if (error) throw error;
+    } else {
+      reports.push({ id: "local-" + Date.now(), ...r, restored_at: null });
+    }
+    const key = rateKey(form);
+    const log = getReportLog();
+    const hourAgo = now - 60 * 60 * 1000;
+    log[key] = [
+      ...(Array.isArray(log[key]) ? log[key] : []).filter(t => t > hourAgo),
+      now
+    ];
+    setReportLog(log);
+    clearReportConfirmation();
+    category = form.category;
+    document.querySelectorAll(".tab").forEach(tab => {
+      tab.classList.toggle("active", tab.dataset.category === form.category);
+    });
+    $("carrier").style.display = form.category === "comm" ? "inline-block" : "none";
+    if (form.category === "comm") {
+      $("carrier").value = form.carrier;
+      selectedCarrier = form.carrier;
+    } else {
+      selectedCarrier = "";
+      $("carrier").value = "";
+    }
+    await reload();
+    $("modal").classList.remove("show");
+    msg("通報を受け付けました。");
+  } catch (e) {
+    console.error(e);
+    msg("通報の送信に失敗しました。");
+  }
+};
+locMap=L.map("locationMap").setView(base,11);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap contributors"}).addTo(locMap);locMap.on("click",e=>setLocation(e.latlng.lat,e.latlng.lng));
+if(configured)supabase.channel("reports-realtime").on("postgres_changes",{event:"*",schema:"public",table:"reports"},reload).subscribe();
+reload();
+</script>
+</body>
+</html>
