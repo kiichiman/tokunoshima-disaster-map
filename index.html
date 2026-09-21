@@ -225,7 +225,7 @@ $("cancel1").onclick=()=>$("modal").classList.remove("show");
 $("backBtn").onclick=()=>{$("step2").classList.remove("show");$("step1").classList.add("show");$("stepTitle").textContent="（1/2）"};
 $("nextBtn").onclick=()=>{if(form.category==="comm"&&!form.carrier)return msg("キャリアを選択してください。");$("step1").classList.remove("show");$("step2").classList.add("show");$("stepTitle").textContent="（2/2）";setTimeout(()=>locMap.invalidateSize(),100)};
 function setLocation(lat,lng){form.lat=lat;form.lng=lng;$("locationText").textContent=`緯度 ${lat.toFixed(5)} / 経度 ${lng.toFixed(5)}`;if(locMarker)locMarker.setLatLng([lat,lng]);else locMarker=L.marker([lat,lng]).addTo(locMap)}
-$("gpsBtn").onclick=()=>navigator.geolocation.getCurrentPosition(p=>{setLocation(p.coords.latitude,p.coords.longitude);locMap.setView([p.coords.latitude,p.coords.longitude],14)},e=>{console.error(e);msg("GPSで現在地を取得できませんでした。")});
+$("gpsBtn").onclick=()=>{if(!navigator.geolocation)return msg("この端末は位置情報に対応していません。地図をタップで指定してください。");msg("現在地を取得中…");navigator.geolocation.getCurrentPosition(p=>{let{latitude:lat,longitude:lng}=p.coords;setLocation(lat,lng);locMap.setView([lat,lng],14)},e=>{console.error(e);msg(e.code===1?"位置情報が許可されていません。Safariのサイト設定で許可するか、地図をタップで指定してください。":e.code===2?"現在地を取得できませんでした（電波やGPSの状態）。地図をタップで指定できます。":e.code===3?"位置情報の取得がタイムアウトしました。もう一度押すか、地図をタップで指定してください。":"現在地を取得できませんでした。地図をタップで指定できます。")},{enableHighAccuracy:true,timeout:10000,maximumAge:60000})};
 // ---- 通報送信（いたずら対策：ワンタップ確認＋レート制限）----
 const reportBtn = $("sendBtn");
 const reportBtnLabel = reportBtn.textContent;
